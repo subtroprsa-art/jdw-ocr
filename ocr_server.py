@@ -5,9 +5,14 @@ import base64
 from PIL import Image
 import io
 import os
+import subprocess
 
 app = Flask(__name__)
 CORS(app)
+
+# Tell pytesseract where tesseract is installed
+# On Render, it's usually in /usr/bin/tesseract
+pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 
 @app.route('/')
 def home():
@@ -15,7 +20,13 @@ def home():
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({'status': 'ok', 'ocr': 'tesseract'})
+    # Check if tesseract is available
+    try:
+        result = subprocess.run(['tesseract', '--version'], capture_output=True, text=True)
+        version = result.stdout.split('\n')[0] if result.stdout else 'unknown'
+        return jsonify({'status': 'ok', 'ocr': 'tesseract', 'version': version})
+    except Exception as e:
+        return jsonify({'status': 'error', 'ocr': 'tesseract', 'error': str(e)}), 500
 
 @app.route('/ocr', methods=['POST'])
 def ocr_image():
@@ -32,6 +43,7 @@ def ocr_image():
         image_bytes = base64.b64decode(image_data)
         image = Image.open(io.BytesIO(image_bytes))
         
+        # Run Tesseract OCR
         text = pytesseract.image_to_string(image)
         
         return jsonify({'text': text})
