@@ -1,18 +1,40 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import pytesseract
 import base64
 from PIL import Image
 import io
 import os
 import subprocess
+import sys
 
 app = Flask(__name__)
 CORS(app)
 
-# Tell pytesseract where tesseract is installed
-# On Render, it's usually in /usr/bin/tesseract
-pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
+# Try to find tesseract
+tesseract_paths = [
+    '/usr/bin/tesseract',
+    '/usr/local/bin/tesseract',
+    '/opt/render/project/.local/bin/tesseract',
+    'tesseract'
+]
+
+tesseract_found = None
+for path in tesseract_paths:
+    try:
+        result = subprocess.run([path, '--version'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            tesseract_found = path
+            break
+    except:
+        continue
+
+if tesseract_found:
+    import pytesseract
+    pytesseract.pytesseract.tesseract_cmd = tesseract_found
+    print(f"✅ Tesseract found at: {tesseract_found}")
+else:
+    print("❌ Tesseract not found. OCR will not work.")
+    pytesseract = None
 
 @app.route('/')
 def home():
@@ -20,16 +42,16 @@ def home():
 
 @app.route('/health', methods=['GET'])
 def health():
-    # Check if tesseract is available
-    try:
-        result = subprocess.run(['tesseract', '--version'], capture_output=True, text=True)
-        version = result.stdout.split('\n')[0] if result.stdout else 'unknown'
-        return jsonify({'status': 'ok', 'ocr': 'tesseract', 'version': version})
-    except Exception as e:
-        return jsonify({'status': 'error', 'ocr': 'tesseract', 'error': str(e)}), 500
+    if tesseract_found:
+        return jsonify({'status': 'ok', 'ocr': 'tesseract', 'path': tesseract_found})
+    else:
+        return jsonify({'status': 'error', 'ocr': 'tesseract', 'error': 'Tesseract not found'}), 500
 
 @app.route('/ocr', methods=['POST'])
 def ocr_image():
+    if pytesseract is None:
+        return jsonify({'error': 'Tesseract not available'}), 500
+    
     try:
         data = request.json
         image_data = data.get('image', '')
@@ -43,7 +65,6 @@ def ocr_image():
         image_bytes = base64.b64decode(image_data)
         image = Image.open(io.BytesIO(image_bytes))
         
-        # Run Tesseract OCR
         text = pytesseract.image_to_string(image)
         
         return jsonify({'text': text})
