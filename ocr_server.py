@@ -1,57 +1,33 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import easyocr
 import base64
 from PIL import Image
 import io
 import os
-import subprocess
-import sys
 
 app = Flask(__name__)
 CORS(app)
 
-# Try to find tesseract
-tesseract_paths = [
-    '/usr/bin/tesseract',
-    '/usr/local/bin/tesseract',
-    '/opt/render/project/.local/bin/tesseract',
-    'tesseract'
-]
-
-tesseract_found = None
-for path in tesseract_paths:
-    try:
-        result = subprocess.run([path, '--version'], capture_output=True, text=True, timeout=5)
-        if result.returncode == 0:
-            tesseract_found = path
-            break
-    except:
-        continue
-
-if tesseract_found:
-    import pytesseract
-    pytesseract.pytesseract.tesseract_cmd = tesseract_found
-    print(f"✅ Tesseract found at: {tesseract_found}")
-else:
-    print("❌ Tesseract not found. OCR will not work.")
-    pytesseract = None
+# Initialize EasyOCR (this will download model on first run)
+print("🔄 Loading EasyOCR...")
+reader = easyocr.Reader(['en'], gpu=False)
+print("✅ EasyOCR loaded!")
 
 @app.route('/')
 def home():
-    return 'OCR Service Running'
+    return 'OCR Service Running (EasyOCR)'
 
 @app.route('/health', methods=['GET'])
 def health():
-    if tesseract_found:
-        return jsonify({'status': 'ok', 'ocr': 'tesseract', 'path': tesseract_found})
-    else:
-        return jsonify({'status': 'error', 'ocr': 'tesseract', 'error': 'Tesseract not found'}), 500
+    return jsonify({
+        'status': 'ok',
+        'ocr': 'easyocr',
+        'message': 'EasyOCR is ready'
+    })
 
 @app.route('/ocr', methods=['POST'])
 def ocr_image():
-    if pytesseract is None:
-        return jsonify({'error': 'Tesseract not available'}), 500
-    
     try:
         data = request.json
         image_data = data.get('image', '')
@@ -65,7 +41,9 @@ def ocr_image():
         image_bytes = base64.b64decode(image_data)
         image = Image.open(io.BytesIO(image_bytes))
         
-        text = pytesseract.image_to_string(image)
+        # Run EasyOCR
+        result = reader.readtext(image, detail=0)
+        text = '\n'.join(result)
         
         return jsonify({'text': text})
     
